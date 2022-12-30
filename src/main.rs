@@ -15,12 +15,12 @@ fn main() {
 
     let intr1 = Arc::clone(&intr);
     thread::spawn(move || {
-        intr1.write().unwrap().run();
+        intr1.write().unwrap().execute();
     });
 
     event_loop.run(move |event, _, _| {
         if let Event::RedrawRequested(_) = event {
-            if let Err(e) = intr.write().unwrap().render() {
+            if let Err(e) = intr.write().unwrap().get_display_mut().render() {
                 error!("Failed to render to screen: {}", e);
             }
         }
