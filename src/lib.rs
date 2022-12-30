@@ -1,11 +1,19 @@
 use log::{debug, error, info, trace};
 use pixels::{Pixels, SurfaceTexture};
-use std::fmt;
-use std::ops::{Deref, DerefMut};
-use winit::window::Window;
-use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+    sync::mpsc::{Receiver, TryRecvError},
+};
+use winit::{
+    dpi::LogicalSize,
+    event::VirtualKeyCode,
+    event_loop::EventLoop,
+    window::{Window, WindowBuilder},
+};
 
 mod font;
+pub mod input;
 
 macro_rules! wrapper {
     ($($name:ident => $size:expr),*) => {
@@ -100,7 +108,7 @@ impl Interpreter {
         Instruction::from(self.fetch())
     }
 
-    pub fn execute(&mut self) {
+    pub fn execute(&mut self, rx: Receiver<VirtualKeyCode>) {
         loop {
             let inst = self.decode();
             debug!("Processing instruction [{:?}]", inst);
@@ -111,9 +119,12 @@ impl Interpreter {
                 [7, register, n1, n2] => self.add_to_register(register as usize, n1, n2),
                 [0xA, n1, n2, n3] => self.set_memory_ptr(n1, n2, n3),
                 [0xD, vx, vy, height] => self.draw_sprite(vx as usize, vy as usize, height),
+                [0xF, vx, 0x0, 0xA] => self.get_key(vx as usize, &rx),
+                [0xE, vx, 0x9, 0xE] => self.skip_key(vx as usize, &rx, true),
+                [0xE, vx, 0xA, 0x1] => self.skip_key(vx as usize, &rx, false),
                 _ => {}
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(std::time::Duration::from_millis(1000 / 700));
         }
     }
 
@@ -160,6 +171,50 @@ impl Interpreter {
             }
         }
         self.get_display_mut().render();
+    }
+
+    fn get_key(&mut self, vx: usize, rx: &Receiver<VirtualKeyCode>) {
+        'wait: loop {
+            match rx.try_recv() {
+                Ok(key) => {
+                    let &key = input::KEYMAP.get(&key).unwrap();
+                    self.registers[vx] = key;
+                    trace!("Stored key {key:01X} in register V{vx:01X}");
+                    break 'wait;
+                }
+                Err(e) => match e {
+                    TryRecvError::Empty => {}
+                    TryRecvError::Disconnected => {
+                        error!("Key receiver hung up");
+                        std::process::exit(1);
+                    }
+                },
+            }
+        }
+    }
+
+    fn skip_key(&mut self, vx: usize, rx: &Receiver<VirtualKeyCode>, press: bool) {
+        std::thread::sleep(std::time::Duration::from_millis(200)); // TODO: figure out a better way
+        match rx.try_recv() {
+            Ok(key) => {
+                let &key = input::KEYMAP.get(&key).unwrap();
+                trace!("Key received: {key:01X} | VX: {}", self.registers[vx]);
+                if press && self.registers[vx] == key {
+                    self.pc += 2;
+                    trace!("Incremented PC by 2");
+                } else if !press && self.registers[vx] != key {
+                    self.pc += 2;
+                    trace!("Incremented PC by 2");
+                }
+            }
+            Err(e) => match e {
+                TryRecvError::Empty => {}
+                TryRecvError::Disconnected => {
+                    error!("Key receiver hung up");
+                    std::process::exit(1);
+                }
+            },
+        };
     }
 }
 
