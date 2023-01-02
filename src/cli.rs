@@ -30,6 +30,7 @@ impl ToString for DebugMode {
     }
 }
 
+#[must_use]
 pub fn init() -> Cli {
     let cli = Cli::parse();
     std::env::set_var(
