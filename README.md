@@ -14,13 +14,13 @@ cargo install etherea
 
 ## Usage
 
-###### Run a ROM:
+**Run a ROM:**
 
 ```sh
 etherea path/to/rom.ch8
 ```
 
-###### View options:
+**View options:**
 
 ```sh
 etherea --help
