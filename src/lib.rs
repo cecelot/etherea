@@ -719,6 +719,8 @@ mod bits {
     }
 }
 
+/// Returns the digit at index `i` in the number `n`. Numbers are indexed from
+/// least-significant to most-significant.
 fn digit(i: u32, n: usize) -> usize {
     (n / (10usize.pow(i))) % 10
 }
