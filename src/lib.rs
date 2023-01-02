@@ -174,10 +174,112 @@ impl Interpreter {
                 [0xF, vx, 0x0, 0xA] => self.get_key(usize::from(vx), rx),
                 [0xE, vx, 0x9, 0xE] => self.skip_key(usize::from(vx), rx, true),
                 [0xE, vx, 0xA, 0x1] => self.skip_key(usize::from(vx), rx, false),
+                [2, n1, n2, n3] => self.call_subroutine(n1, n2, n3),
+                [0, 0, 0xE, 0xE] => self.subroutine_return(),
+                [0x3, register, n1, n2] => self.skip_vx(usize::from(register), n1, n2, true),
+                [0x4, register, n1, n2] => self.skip_vx(usize::from(register), n1, n2, false),
+                [5, vx, vy, 0] => self.skip_vxy(usize::from(vx), usize::from(vy), true),
+                [9, vx, vy, 0] => self.skip_vxy(usize::from(vx), usize::from(vy), false),
+                [8, x, y, 0] => self.set(usize::from(x), usize::from(y)),
+                [8, x, y, 1] => self.or(usize::from(x), usize::from(y)),
+                [8, x, y, 2] => self.and(usize::from(x), usize::from(y)),
+                [8, x, y, 3] => self.xor(usize::from(x), usize::from(y)),
+                [8, x, y, 4] => self.add(usize::from(x), usize::from(y)),
+                [8, x, y, 5] => self.sub(usize::from(x), usize::from(x), usize::from(y)),
+                [8, x, _, 6] => self.shift_right(usize::from(x)),
+                [8, x, y, 7] => self.sub(usize::from(x), usize::from(y), usize::from(x)),
+                [8, x, _, 0xE] => self.shift_left(usize::from(x)),
                 _ => {}
             }
             std::thread::sleep(std::time::Duration::from_millis(1000 / 700));
         }
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#00ee-and-2nnn-subroutines>
+    fn call_subroutine(&mut self, n1: u8, n2: u8, n3: u8) {
+        self.stack.push(u16::try_from(self.pc).unwrap());
+        let pc = usize::from_be_bytes([0, 0, 0, 0, 0, 0, n1, bits::recombine(n2, n3)]);
+        self.pc = pc;
+        trace!("Set PC to {pc}");
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#00ee-and-2nnn-subroutines>
+    fn subroutine_return(&mut self) {
+        let pc = usize::from(self.stack.pop().unwrap());
+        self.pc = pc;
+        trace!("Set PC to {pc}");
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#3xnn-4xnn-5xy0-and-9xy0-skip>
+    fn skip_vx(&mut self, register: usize, n1: u8, n2: u8, equality: bool) {
+        let vx = self.registers[register];
+        let x = bits::recombine(n1, n2);
+        if equality && vx == x {
+            self.pc += 2;
+        } else if !equality && vx != x {
+            self.pc += 2;
+        }
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#3xnn-4xnn-5xy0-and-9xy0-skip>
+    fn skip_vxy(&mut self, vx: usize, vy: usize, equality: bool) {
+        let vx = self.registers[vx];
+        let vy = self.registers[vy];
+        if equality && vx == vy {
+            self.pc += 2;
+        } else if !equality && vx != vy {
+            self.pc += 2;
+        }
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy0-set>
+    fn set(&mut self, vx: usize, vy: usize) {
+        self.registers[vx] = self.registers[vy];
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy1-binary-or>
+    fn or(&mut self, vx: usize, vy: usize) {
+        self.registers[vx] |= self.registers[vy];
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy2-binary-and>
+    fn and(&mut self, vx: usize, vy: usize) {
+        self.registers[vx] &= self.registers[vy];
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy3-logical-xor>
+    fn xor(&mut self, vx: usize, vy: usize) {
+        self.registers[vx] ^= self.registers[vy];
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy4-add>
+    fn add(&mut self, vx: usize, vy: usize) {
+        let x = usize::from(self.registers[vx]);
+        let y = usize::from(self.registers[vy]);
+        self.registers[vx] = self.registers[vx].wrapping_add(self.registers[vy]);
+        self.registers[0xF] = if x + y > 255 { 1 } else { 0 };
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy5-and-8xy7-subtract>
+    fn sub(&mut self, vx: usize, lhs: usize, rhs: usize) {
+        let lhs = self.registers[lhs];
+        let rhs = self.registers[rhs];
+        self.registers[0xF] = if lhs > rhs { 1 } else { 0 };
+        self.registers[vx] = lhs.wrapping_sub(rhs);
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy6-and-8xye-shift>
+    fn shift_left(&mut self, vx: usize) {
+        let shifted = bits::set(7, self.registers[vx]);
+        self.registers[vx] <<= 1;
+        self.registers[0xF] = if shifted { 1 } else { 0 };
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy6-and-8xye-shift>
+    fn shift_right(&mut self, vx: usize) {
+        let shifted = bits::set(0, self.registers[vx]);
+        self.registers[vx] >>= 1;
+        self.registers[0xF] = if shifted { 1 } else { 0 };
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#1nnn-jump>
