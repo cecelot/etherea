@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn instruction() {
-        let val = 0b00101110; // 46
+        let val = 0b0010_1110; // 46
         let inst = Instruction::from(val);
         assert_eq!(
             inst,
