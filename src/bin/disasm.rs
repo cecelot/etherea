@@ -28,7 +28,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(f)?;
     }
 
-    let path = cli.output_file.unwrap_or(PathBuf::from("output.txt"));
+    let path = cli
+        .output_file
+        .unwrap_or_else(|| PathBuf::from("output.txt"));
     let mut file = fs::File::create(&path)?;
     let rom = fs::read(&cli.path)?;
 
