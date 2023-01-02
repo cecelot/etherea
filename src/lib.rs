@@ -244,7 +244,10 @@ impl Interpreter {
                 [0xF, vx, 3, 3] => self.conversion(usize::from(vx)),             // FX33
                 [0xF, vx, 5, 5] => self.store_to_memory(usize::from(vx)),        // FX55
                 [0xF, vx, 6, 5] => self.load_from_memory(usize::from(vx)),       // FX65
-                _ => unimplemented!(),
+                _ => {
+                    error!("Unknown opcode: {:?}", &inst);
+                    std::process::exit(1);
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(3));
         }
@@ -455,11 +458,11 @@ impl Interpreter {
                 {
                     self.registers[0xF] = 1;
                 }
-                if x >= Display::WIDTH {
+                if x >= Display::WIDTH - 1 {
                     break;
                 }
             }
-            if y >= Display::HEIGHT {
+            if y >= Display::HEIGHT - 1 {
                 break;
             }
         }
