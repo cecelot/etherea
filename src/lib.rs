@@ -1,3 +1,5 @@
+#![deny(clippy::pedantic)]
+//! A CHIP-8 interpreter.
 use log::{debug, error, info, trace};
 use pixels::{Pixels, SurfaceTexture};
 use std::{
@@ -56,8 +58,8 @@ macro_rules! wrapper {
 
 /// The entrypoint for the CHIP-8 interpreter. Creates two threads, one for
 /// the fetch/decode/execute loop and one for the 60Hz timer loop.
-pub fn run(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
-    Interpreter::main(Arc::clone(&intr), rx);
+pub fn run(intr: &Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
+    Interpreter::main(Arc::clone(intr), rx);
     Interpreter::timers(intr);
 }
 
@@ -66,7 +68,7 @@ pub fn run(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
 #[derive(Debug, Default)]
 pub struct Interpreter {
     i: u16,                      // Index register
-    pc: u16,                     // Program counter
+    pc: usize,                   // Program counter
     stack: Vec<u16>,             // Stack
     memory: Memory,              // Memory
     display: Option<Display>,    // Display
@@ -83,8 +85,9 @@ impl Interpreter {
     /// Creates a new CHIP-8 instance with all fields zero-initialized.
     /// To attach a display to the interpreter, use
     /// [`attach_display`](Self::attach_display).
+    #[must_use]
     pub fn new() -> Self {
-        Default::default()
+        Self::default()
     }
 
     /// Attaches the display to the interpreter.
@@ -96,12 +99,12 @@ impl Interpreter {
     /// Creates a new thread for the fetch/decode/execute loop.
     fn main(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
         thread::spawn(move || {
-            intr.write().unwrap().execute(rx);
+            intr.write().unwrap().execute(&rx);
         });
     }
 
     /// Creates a new thread for the 60Hz timer loop.
-    fn timers(intr: Arc<RwLock<Interpreter>>) {
+    fn timers(intr: &Arc<RwLock<Interpreter>>) {
         let timers = intr.read().unwrap().get_timers();
         thread::spawn(move || loop {
             timers.write().unwrap().update();
@@ -110,16 +113,16 @@ impl Interpreter {
     }
 
     /// Loads the rom into the CHIP-8 interpreter's memory buffer.
-    pub fn load_rom(&mut self, rom: Vec<u8>) {
+    pub fn load_rom(&mut self, rom: &[u8]) {
         self.i = 0;
-        self.pc = u16::try_from(Self::MEMORY_OFFSET).unwrap();
+        self.pc = Self::MEMORY_OFFSET;
         self.stack = Vec::new();
         self.memory = Memory::default();
         self.timers = Arc::new(RwLock::new(Timers::default()));
         self.registers = RegisterArray::default();
 
         self.memory[font::MEMORY_RANGE].copy_from_slice(font::FONT);
-        self.memory[Self::MEMORY_OFFSET..Self::MEMORY_OFFSET + rom.len()].copy_from_slice(&rom);
+        self.memory[Self::MEMORY_OFFSET..Self::MEMORY_OFFSET + rom.len()].copy_from_slice(rom);
         info!("Loaded ROM [size: {}]", rom.len());
     }
 
@@ -130,21 +133,17 @@ impl Interpreter {
 
     /// Obtains a mutable reference to the attached display.
     fn get_display_mut(&mut self) -> &mut Display {
-        match self.display.as_mut() {
-            Some(display) => display,
-            None => {
-                error!("No display attached");
-                std::process::exit(1)
-            }
+        if let Some(display) = self.display.as_mut() {
+            display
+        } else {
+            error!("No display attached");
+            std::process::exit(1)
         }
     }
 
     /// Fetches the instruction at the PC (program counter) from memory.
     fn fetch(&mut self) -> u16 {
-        let inst = u16::from_be_bytes([
-            self.memory[self.pc as usize],
-            self.memory[self.pc as usize + 1],
-        ]);
+        let inst = u16::from_be_bytes([self.memory[self.pc], self.memory[self.pc + 1]]);
         self.pc += 2;
         inst
     }
@@ -156,7 +155,7 @@ impl Interpreter {
 
     /// Executes the current instruction, pausing for ~1.4ms to
     /// achieve a speed of approximately 700 instructions/second.
-    fn execute(&mut self, rx: Receiver<VirtualKeyCode>) {
+    fn execute(&mut self, rx: &Receiver<VirtualKeyCode>) {
         loop {
             let inst = self.decode();
             debug!("Processing instruction [{:?}]", inst);
@@ -168,13 +167,13 @@ impl Interpreter {
             match inst.nibbles[..] {
                 [0, 0, 0xE, 0] => self.get_display_mut().clear(),
                 [1, n1, n2, n3] => self.jump(n1, n2, n3),
-                [6, register, n1, n2] => self.set_register(register as usize, n1, n2),
-                [7, register, n1, n2] => self.add_to_register(register as usize, n1, n2),
+                [6, register, n1, n2] => self.set_register(usize::from(register), n1, n2),
+                [7, register, n1, n2] => self.add_to_register(usize::from(register), n1, n2),
                 [0xA, n1, n2, n3] => self.set_memory_ptr(n1, n2, n3),
-                [0xD, vx, vy, height] => self.draw_sprite(vx as usize, vy as usize, height),
-                [0xF, vx, 0x0, 0xA] => self.get_key(vx as usize, &rx),
-                [0xE, vx, 0x9, 0xE] => self.skip_key(vx as usize, &rx, true),
-                [0xE, vx, 0xA, 0x1] => self.skip_key(vx as usize, &rx, false),
+                [0xD, vx, vy, height] => self.draw_sprite(usize::from(vx), usize::from(vy), height),
+                [0xF, vx, 0x0, 0xA] => self.get_key(usize::from(vx), rx),
+                [0xE, vx, 0x9, 0xE] => self.skip_key(usize::from(vx), rx, true),
+                [0xE, vx, 0xA, 0x1] => self.skip_key(usize::from(vx), rx, false),
                 _ => {}
             }
             std::thread::sleep(std::time::Duration::from_millis(1000 / 700));
@@ -183,7 +182,7 @@ impl Interpreter {
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#1nnn-jump>
     fn jump(&mut self, n1: u8, n2: u8, n3: u8) {
-        let pc = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
+        let pc = usize::from_be_bytes([0, 0, 0, 0, 0, 0, n1, bits::recombine(n2, n3)]);
         self.pc = pc;
         trace!("Jumped PC to {pc}");
     }
@@ -211,14 +210,15 @@ impl Interpreter {
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#dxyn-display>
     fn draw_sprite(&mut self, vx: usize, vy: usize, height: u8) {
-        let x = self.registers[vx] % Display::WIDTH as u8;
-        let y = self.registers[vy] % Display::HEIGHT as u8;
+        let x = self.registers[vx] % Display::WIDTH;
+        let y = self.registers[vy] % Display::HEIGHT;
         trace!("x: {x} height: {height}");
         self.registers[0xF] = 0;
         for (idx, y) in (y..y + height).enumerate() {
-            let sprite = self.memory[self.i as usize..][idx];
+            let sprite = self.memory[usize::from(self.i)..][idx];
             for (n, x) in (x..x + 8).enumerate() {
-                let lit = bits::set(7 - n as u8, sprite);
+                let n = u8::try_from(n).unwrap();
+                let lit = bits::set(7 - n, sprite);
                 trace!("Drawing pixel [on: {}] [idx: {idx}] at ({x}, {y})", lit);
                 if self
                     .get_display_mut()
@@ -283,7 +283,7 @@ impl Interpreter {
 pub struct Display {
     /// The pixels which are copied into [`pixels`](Self::pixels)
     /// upon a call to [`render`](Self::render).
-    scratch_pixels: [u8; Self::WIDTH * Self::HEIGHT * 4],
+    scratch_pixels: [u8; Self::WIDTH as usize * Self::HEIGHT as usize * 4],
     /// Keeps the window alive.
     _window: Window,
     /// A pixel buffer of the pixels currently being displayed.
@@ -291,14 +291,21 @@ pub struct Display {
 }
 
 impl Display {
-    const WIDTH: usize = 64;
-    const HEIGHT: usize = 32;
+    const WIDTH: u8 = 64;
+    const HEIGHT: u8 = 32;
 
     /// Creates a new Window and pixel buffer attached to the given [`EventLoop`](winit::event_loop::EventLoop).
+    ///
+    /// # Panics
+    /// This function will panic if the window fails to be created.
+    #[must_use]
     pub fn new(el: &EventLoop<()>) -> Self {
         let window = {
-            let size = LogicalSize::new(Self::WIDTH as u32, Self::HEIGHT as u32);
-            let scaled = LogicalSize::new(Self::WIDTH as f64 * 10.0, Self::HEIGHT as f64 * 10.0);
+            let size = LogicalSize::new(u32::from(Self::WIDTH), u32::from(Self::HEIGHT));
+            let scaled = LogicalSize::new(
+                f64::from(Self::WIDTH) * 10.0,
+                f64::from(Self::HEIGHT) * 10.0,
+            );
             WindowBuilder::new()
                 .with_title("CHIP-8")
                 .with_inner_size(scaled)
@@ -310,11 +317,11 @@ impl Display {
         let pixels = {
             let size = window.inner_size();
             let texture = SurfaceTexture::new(size.width, size.height, &window);
-            Pixels::new(Self::WIDTH as u32, Self::HEIGHT as u32, texture).unwrap()
+            Pixels::new(u32::from(Self::WIDTH), u32::from(Self::HEIGHT), texture).unwrap()
         };
 
         Self {
-            scratch_pixels: [0; Self::WIDTH * Self::HEIGHT * 4],
+            scratch_pixels: [0; Self::WIDTH as usize * Self::HEIGHT as usize * 4],
             _window: window,
             pixels,
         }
@@ -322,7 +329,7 @@ impl Display {
 
     /// Clears the display.
     fn clear(&mut self) {
-        self.scratch_pixels = [0; Self::WIDTH * Self::HEIGHT * 4];
+        self.scratch_pixels = [0; Self::WIDTH as usize * Self::HEIGHT as usize * 4];
         self.render();
     }
 
@@ -346,9 +353,9 @@ impl Display {
     /// Writes the pixel at (`x`, `y`) with the RGBA values specified by `rgba` if
     /// `on` is true, otherwise writes a black pixel.
     fn write_at(&mut self, x: u8, y: u8, rgba: [u8; 4], on: bool) -> bool {
-        let x = x as usize;
-        let y = y as usize;
-        let idx = (y * Self::WIDTH + x) * 4;
+        let x = usize::from(x);
+        let y = usize::from(y);
+        let idx = (y * usize::from(Self::WIDTH) + x) * 4;
         let pixels = if on { rgba } else { [0x0, 0x0, 0x0, 0x0] };
         let set = self.scratch_pixels[idx..idx + 4] == [0xFF, 0xFF, 0xFF, 0xFF];
         self.scratch_pixels[idx..idx + 4].copy_from_slice(&pixels);
@@ -410,8 +417,8 @@ impl From<u16> for Instruction {
 
 impl fmt::Debug for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for nibble in self.nibbles.iter() {
-            write!(f, "{:X}", nibble)?;
+        for nibble in &self.nibbles {
+            write!(f, "{nibble:X}")?;
         }
         Ok(())
     }
