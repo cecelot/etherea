@@ -356,17 +356,17 @@ impl Interpreter {
     fn conversion(&mut self, vx: usize) {
         let x = usize::from(self.registers[vx]);
         let i = usize::from(self.i);
-        let a = u8::try_from(digit(2, x)).unwrap();
-        let b = u8::try_from(digit(1, x)).unwrap();
-        let c = u8::try_from(digit(0, x)).unwrap();
-        self.memory[i..i + 3].copy_from_slice(&[a, b, c]);
+        let left = u8::try_from(digit(2, x)).unwrap();
+        let mid = u8::try_from(digit(1, x)).unwrap();
+        let right = u8::try_from(digit(0, x)).unwrap();
+        self.memory[i..i + 3].copy_from_slice(&[left, mid, right]);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx55-and-fx65-store-and-load-memory>
     fn store_to_memory(&mut self, vx: usize) {
         let len = (0x0..=vx).count();
         let i = usize::from(self.i);
-        self.memory[i..i + len].copy_from_slice(&self.registers[0x0..=vx])
+        self.memory[i..i + len].copy_from_slice(&self.registers[0x0..=vx]);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx55-and-fx65-store-and-load-memory>
