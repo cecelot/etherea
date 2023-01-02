@@ -16,12 +16,18 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+/// Font-related constants.
 mod font;
+/// Input-related constants.
 pub mod input;
 
+/// A workaround for calling [`Default`](std::default::Default) on
+/// an arbitrarily sized slice. Implements [`Deref`](std::ops::Deref)
+/// and [`DerefMut`](std::ops::DerefMut) for ease of use.
 macro_rules! wrapper {
-    ($($name:ident => $size:expr),*) => {
+    ($($(#[$($attrs:meta)*])* $name:ident => $size:expr),*) => {
         $(
+            $(#[$($attrs)*])*
             #[derive(Debug)]
             struct $name([u8; $size]);
 
@@ -48,12 +54,15 @@ macro_rules! wrapper {
     };
 }
 
+/// The entrypoint for the CHIP-8 interpreter. Creates two threads, one for
+/// the fetch/decode/execute loop and one for the 60Hz timer loop.
 pub fn run(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
     Interpreter::main(Arc::clone(&intr), rx);
     Interpreter::timers(intr);
 }
 
-#[allow(dead_code)]
+/// The CHIP-8 interpreter state.
+/// [Specifications](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#specifications).
 #[derive(Debug, Default)]
 pub struct Interpreter {
     i: u16,                      // Index register
@@ -67,19 +76,31 @@ pub struct Interpreter {
 
 impl Interpreter {
     const MEMORY_SIZE: usize = 4096;
+    /// The start location for program-accessible memory.
     const MEMORY_OFFSET: usize = 0x200;
     const REGISTER_COUNT: usize = 16;
 
+    /// Creates a new CHIP-8 instance with all fields zero-initialized.
+    /// To attach a display to the interpreter, use
+    /// [`attach_display`](Self::attach_display).
     pub fn new() -> Self {
         Default::default()
     }
 
+    /// Attaches the display to the interpreter.
+    pub fn attach_display(&mut self, display: Display) {
+        self.display = Some(display);
+        info!("Attached display [success: true]");
+    }
+
+    /// Creates a new thread for the fetch/decode/execute loop.
     fn main(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
         thread::spawn(move || {
             intr.write().unwrap().execute(rx);
         });
     }
 
+    /// Creates a new thread for the 60Hz timer loop.
     fn timers(intr: Arc<RwLock<Interpreter>>) {
         let timers = intr.read().unwrap().get_timers();
         thread::spawn(move || loop {
@@ -88,11 +109,7 @@ impl Interpreter {
         });
     }
 
-    pub fn attach_display(&mut self, display: Display) {
-        self.display = Some(display);
-        info!("Attached display [success: true]");
-    }
-
+    /// Loads the rom into the CHIP-8 interpreter's memory buffer.
     pub fn load_rom(&mut self, rom: Vec<u8>) {
         self.i = 0;
         self.pc = u16::try_from(Self::MEMORY_OFFSET).unwrap();
@@ -106,11 +123,13 @@ impl Interpreter {
         info!("Loaded ROM [size: {}]", rom.len());
     }
 
+    /// Obtains a reference to the timers.
     fn get_timers(&self) -> Arc<RwLock<Timers>> {
         Arc::clone(&self.timers)
     }
 
-    pub fn get_display_mut(&mut self) -> &mut Display {
+    /// Obtains a mutable reference to the attached display.
+    fn get_display_mut(&mut self) -> &mut Display {
         match self.display.as_mut() {
             Some(display) => display,
             None => {
@@ -120,6 +139,7 @@ impl Interpreter {
         }
     }
 
+    /// Fetches the instruction at the PC (program counter) from memory.
     fn fetch(&mut self) -> u16 {
         let inst = u16::from_be_bytes([
             self.memory[self.pc as usize],
@@ -129,11 +149,14 @@ impl Interpreter {
         inst
     }
 
+    /// Decodes the instruction fetched with [`fetch`](Self::fetch).
     fn decode(&mut self) -> Instruction {
         Instruction::from(self.fetch())
     }
 
-    pub fn execute(&mut self, rx: Receiver<VirtualKeyCode>) {
+    /// Executes the current instruction, pausing for ~1.4ms to
+    /// achieve a speed of approximately 700 instructions/second.
+    fn execute(&mut self, rx: Receiver<VirtualKeyCode>) {
         loop {
             let inst = self.decode();
             debug!("Processing instruction [{:?}]", inst);
@@ -158,33 +181,38 @@ impl Interpreter {
         }
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#1nnn-jump>
     fn jump(&mut self, n1: u8, n2: u8, n3: u8) {
         let pc = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
         self.pc = pc;
         trace!("Jumped PC to {pc}");
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#6xnn-set>
     fn set_register(&mut self, register: usize, n1: u8, n2: u8) {
         let value = bits::recombine(n1, n2);
         self.registers[register] = value;
         trace!("Set register V{register:01X} to {value}");
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#7xnn-add>
     fn add_to_register(&mut self, register: usize, n1: u8, n2: u8) {
         let value = bits::recombine(n1, n2);
         self.registers[register] += value;
         trace!("Added {value} to register V{register:01X}");
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#annn-set-index>
     fn set_memory_ptr(&mut self, n1: u8, n2: u8, n3: u8) {
         let value = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
         self.i = value;
         trace!("Set index register I to {value}");
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#dxyn-display>
     fn draw_sprite(&mut self, vx: usize, vy: usize, height: u8) {
-        let x = self.registers[vx] % WIDTH as u8;
-        let y = self.registers[vy] % HEIGHT as u8;
+        let x = self.registers[vx] % Display::WIDTH as u8;
+        let y = self.registers[vy] % Display::HEIGHT as u8;
         trace!("x: {x} height: {height}");
         self.registers[0xF] = 0;
         for (idx, y) in (y..y + height).enumerate() {
@@ -203,6 +231,7 @@ impl Interpreter {
         self.get_display_mut().render();
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#ex9e-and-exa1-skip-if-key>
     fn get_key(&mut self, vx: usize, rx: &Receiver<VirtualKeyCode>) {
         'wait: loop {
             match rx.try_recv() {
@@ -223,6 +252,7 @@ impl Interpreter {
         }
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#ex9e-and-exa1-skip-if-key>
     fn skip_key(&mut self, vx: usize, rx: &Receiver<VirtualKeyCode>, press: bool) {
         std::thread::sleep(std::time::Duration::from_millis(200)); // TODO: figure out a better way
         match rx.try_recv() {
@@ -248,52 +278,61 @@ impl Interpreter {
     }
 }
 
-const WIDTH: usize = 64;
-const HEIGHT: usize = 32;
-
+/// The CHIP-8 display.
 #[derive(Debug)]
 pub struct Display {
-    scratch_pixels: [u8; WIDTH * HEIGHT * 4], // RGBA
-    _window: Window,                          // Keeps the window alive
+    /// The pixels which are copied into [`pixels`](Self::pixels)
+    /// upon a call to [`render`](Self::render).
+    scratch_pixels: [u8; Self::WIDTH * Self::HEIGHT * 4],
+    /// Keeps the window alive.
+    _window: Window,
+    /// A pixel buffer of the pixels currently being displayed.
     pixels: Pixels,
 }
 
 impl Display {
-    pub fn new(event_loop: &EventLoop<()>) -> Self {
+    const WIDTH: usize = 64;
+    const HEIGHT: usize = 32;
+
+    /// Creates a new Window and pixel buffer attached to the given [`EventLoop`](winit::event_loop::EventLoop).
+    pub fn new(el: &EventLoop<()>) -> Self {
         let window = {
-            let size = LogicalSize::new(WIDTH as u32, HEIGHT as u32);
-            let scaled_size = LogicalSize::new(WIDTH as f64 * 10.0, HEIGHT as f64 * 10.0);
+            let size = LogicalSize::new(Self::WIDTH as u32, Self::HEIGHT as u32);
+            let scaled = LogicalSize::new(Self::WIDTH as f64 * 10.0, Self::HEIGHT as f64 * 10.0);
             WindowBuilder::new()
                 .with_title("CHIP-8")
-                .with_inner_size(scaled_size)
+                .with_inner_size(scaled)
                 .with_min_inner_size(size)
-                .build(event_loop)
+                .build(el)
                 .unwrap()
         };
 
         let pixels = {
             let size = window.inner_size();
             let texture = SurfaceTexture::new(size.width, size.height, &window);
-            Pixels::new(WIDTH as u32, HEIGHT as u32, texture).unwrap()
+            Pixels::new(Self::WIDTH as u32, Self::HEIGHT as u32, texture).unwrap()
         };
 
         Self {
-            scratch_pixels: [0; WIDTH * HEIGHT * 4],
+            scratch_pixels: [0; Self::WIDTH * Self::HEIGHT * 4],
             _window: window,
             pixels,
         }
     }
 
+    /// Clears the display.
     fn clear(&mut self) {
-        self.scratch_pixels = [0; WIDTH * HEIGHT * 4];
+        self.scratch_pixels = [0; Self::WIDTH * Self::HEIGHT * 4];
         self.render();
     }
 
-    pub fn render(&mut self) {
+    /// Renders the [`scratch_pixels`](Self::scratch_pixels) to the screen, overwriting the existing [`pixels`](Self::pixels).
+    fn render(&mut self) {
         self.draw();
         self.pixels.render().unwrap();
     }
 
+    /// Draws the [`scratch_pixels`](Self::scratch_pixels) to the live pixel buffer.
     fn draw(&mut self) {
         let frame = self.pixels.get_frame_mut();
         for (pixel, scratch_pixel) in frame
@@ -304,10 +343,12 @@ impl Display {
         }
     }
 
+    /// Writes the pixel at (`x`, `y`) with the RGBA values specified by `rgba` if
+    /// `on` is true, otherwise writes a black pixel.
     fn write_at(&mut self, x: u8, y: u8, rgba: [u8; 4], on: bool) -> bool {
         let x = x as usize;
         let y = y as usize;
-        let idx = (y * WIDTH + x) * 4;
+        let idx = (y * Self::WIDTH + x) * 4;
         let pixels = if on { rgba } else { [0x0, 0x0, 0x0, 0x0] };
         let set = self.scratch_pixels[idx..idx + 4] == [0xFF, 0xFF, 0xFF, 0xFF];
         self.scratch_pixels[idx..idx + 4].copy_from_slice(&pixels);
@@ -315,14 +356,18 @@ impl Display {
     }
 }
 
-#[derive(Debug)]
-pub struct Timers {
+/// The CHIP-8 delay and sound timers.
+#[derive(Debug, Default)]
+struct Timers {
     delay: u8,
     sound: u8,
 }
 
 impl Timers {
-    pub fn update(&mut self) {
+    /// Updates the timers, decrementing both by one if
+    /// greater than 0. Plays a sound as long as the sound
+    /// timer greater than 0.
+    fn update(&mut self) {
         if self.delay > 0 {
             self.delay -= 1;
         }
@@ -338,17 +383,14 @@ impl Timers {
     }
 }
 
-impl Default for Timers {
-    fn default() -> Self {
-        Self { delay: 0, sound: 0 }
-    }
-}
-
 wrapper! {
+    /// The CHIP-8 memory buffer.
     Memory => Interpreter::MEMORY_SIZE,
+    /// The CHIP-8 registers.
     RegisterArray => Interpreter::REGISTER_COUNT
 }
 
+/// A CHIP-8 instruction.
 #[derive(PartialEq)]
 struct Instruction {
     nibbles: Vec<u8>,
@@ -375,11 +417,17 @@ impl fmt::Debug for Instruction {
     }
 }
 
+/// Helper functions for bit operations.
 mod bits {
+    /// Returns a bool indicating whether the bit at index n is set.
+    /// Bits are indexed from the least-significant bit to the
+    /// most-significant bit.
     pub const fn set(n: u8, bits: u8) -> bool {
         (bits & (1 << n)) != 0
     }
 
+    /// A helper utility for reconstructing a single 8-bit integer
+    /// from two 4-bit nibbles.
     pub const fn recombine(upper: u8, lower: u8) -> u8 {
         (upper << 4) | lower
     }

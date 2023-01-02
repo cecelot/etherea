@@ -1,6 +1,8 @@
 use std::ops::RangeInclusive;
 
+/// A conventional memory chunk where font data is stored.
 pub const MEMORY_RANGE: RangeInclusive<usize> = 0x50..=0x9F;
+/// The font data represented as a u8 slice.
 pub const FONT: &[u8] = &[
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1

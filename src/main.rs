@@ -9,11 +9,11 @@ const KEYS_TEST: &[u8] = &[0xF0, 0x0A, 0xE0, 0x9E, 0x12, 0x04];
 fn main() {
     env_logger::init();
 
-    let event_loop = EventLoop::new();
+    let el = EventLoop::new();
     let mut input = WinitInputHelper::new();
 
     let intr = Arc::new(RwLock::new({
-        let display = chip8::Display::new(&event_loop);
+        let display = chip8::Display::new(&el);
         let mut intr = chip8::Interpreter::new();
         intr.attach_display(display);
         intr.load_rom(KEYS_TEST.to_vec());
@@ -24,10 +24,10 @@ fn main() {
     let (tx, rx) = mpsc::channel();
     chip8::run(intr, rx);
 
-    event_loop.run(move |event, _, control_flow| {
+    el.run(move |event, _, cf| {
         if input.update(&event) {
             if input.quit() {
-                *control_flow = ControlFlow::Exit;
+                *cf = ControlFlow::Exit;
                 return;
             }
 

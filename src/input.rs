@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use winit::event::VirtualKeyCode;
 
+/// Generates a keymap from a mapping of QWERTY keys to CHIP-8 key codes,
+/// represented as a [`HashMap`](std::collections::HashMap).
 macro_rules! keymap {
     ($($keycode:ident => $mapping:literal),*) => {
         lazy_static::lazy_static! {
+            /// A mapping of QWERTY key codes to the CHIP-8 key it represents.
             pub static ref KEYMAP: HashMap<VirtualKeyCode, u8> = {
                 let mut m = HashMap::new();
                 $(
