@@ -1,12 +1,6 @@
 use log::trace;
-use std::{
-    sync::{mpsc, Arc, RwLock},
-    thread,
-};
-use winit::{
-    event::VirtualKeyCode,
-    event_loop::{ControlFlow, EventLoop},
-};
+use std::sync::{mpsc, Arc, RwLock};
+use winit::event_loop::{ControlFlow, EventLoop};
 use winit_input_helper::WinitInputHelper;
 
 const _IBM_LOGO: &[u8] = include_bytes!("../roms/ibm-logo.ch8");
@@ -27,12 +21,8 @@ fn main() {
         intr
     }));
 
-    let (tx, rx) = mpsc::channel::<VirtualKeyCode>();
-
-    let intr1 = Arc::clone(&intr);
-    thread::spawn(move || {
-        intr1.write().unwrap().execute(rx);
-    });
+    let (tx, rx) = mpsc::channel();
+    chip8::run(intr, rx);
 
     event_loop.run(move |event, _, control_flow| {
         if input.update(&event) {

@@ -3,7 +3,11 @@ use pixels::{Pixels, SurfaceTexture};
 use std::{
     fmt,
     ops::{Deref, DerefMut},
-    sync::mpsc::{Receiver, TryRecvError},
+    sync::{
+        mpsc::{Receiver, TryRecvError},
+        Arc, RwLock,
+    },
+    thread,
 };
 use winit::{
     dpi::LogicalSize,
@@ -44,17 +48,21 @@ macro_rules! wrapper {
     };
 }
 
+pub fn run(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
+    Interpreter::main(Arc::clone(&intr), rx);
+    Interpreter::timers(intr);
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct Interpreter {
-    i: u16,                   // Index register
-    pc: u16,                  // Program counter
-    stack: Vec<u16>,          // Stack
-    memory: Memory,           // Memory
-    display: Option<Display>, // Display
-    delay: u8,                // Delay timer
-    sound: u8,                // Sound timer
-    registers: RegisterArray, // Variable registers (V0..=VF)
+    i: u16,                      // Index register
+    pc: u16,                     // Program counter
+    stack: Vec<u16>,             // Stack
+    memory: Memory,              // Memory
+    display: Option<Display>,    // Display
+    timers: Arc<RwLock<Timers>>, // Timers
+    registers: RegisterArray,    // Variable registers (V0..=VF)
 }
 
 impl Interpreter {
@@ -64,6 +72,20 @@ impl Interpreter {
 
     pub fn new() -> Self {
         Default::default()
+    }
+
+    fn main(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
+        thread::spawn(move || {
+            intr.write().unwrap().execute(rx);
+        });
+    }
+
+    fn timers(intr: Arc<RwLock<Interpreter>>) {
+        let timers = intr.read().unwrap().get_timers();
+        thread::spawn(move || loop {
+            timers.write().unwrap().update();
+            std::thread::sleep(std::time::Duration::from_millis(1000 / 60));
+        });
     }
 
     pub fn attach_display(&mut self, display: Display) {
@@ -76,13 +98,16 @@ impl Interpreter {
         self.pc = u16::try_from(Self::MEMORY_OFFSET).unwrap();
         self.stack = Vec::new();
         self.memory = Memory::default();
-        self.delay = 0;
-        self.sound = 0;
+        self.timers = Arc::new(RwLock::new(Timers::default()));
         self.registers = RegisterArray::default();
 
         self.memory[font::MEMORY_RANGE].copy_from_slice(font::FONT);
         self.memory[Self::MEMORY_OFFSET..Self::MEMORY_OFFSET + rom.len()].copy_from_slice(&rom);
         info!("Loaded ROM [size: {}]", rom.len());
+    }
+
+    fn get_timers(&self) -> Arc<RwLock<Timers>> {
+        Arc::clone(&self.timers)
     }
 
     pub fn get_display_mut(&mut self) -> &mut Display {
@@ -112,6 +137,11 @@ impl Interpreter {
         loop {
             let inst = self.decode();
             debug!("Processing instruction [{:?}]", inst);
+            trace!(
+                "Timers: [sound: {}] [delay: {}]",
+                self.timers.read().unwrap().sound,
+                self.timers.read().unwrap().delay
+            );
             match inst.nibbles[..] {
                 [0, 0, 0xE, 0] => self.get_display_mut().clear(),
                 [1, n1, n2, n3] => self.jump(n1, n2, n3),
@@ -131,25 +161,25 @@ impl Interpreter {
     fn jump(&mut self, n1: u8, n2: u8, n3: u8) {
         let pc = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
         self.pc = pc;
-        debug!("Jumped PC to {pc}");
+        trace!("Jumped PC to {pc}");
     }
 
     fn set_register(&mut self, register: usize, n1: u8, n2: u8) {
         let value = bits::recombine(n1, n2);
         self.registers[register] = value;
-        debug!("Set register V{register:01X} to {value}");
+        trace!("Set register V{register:01X} to {value}");
     }
 
     fn add_to_register(&mut self, register: usize, n1: u8, n2: u8) {
         let value = bits::recombine(n1, n2);
         self.registers[register] += value;
-        debug!("Added {value} to register V{register:01X}");
+        trace!("Added {value} to register V{register:01X}");
     }
 
     fn set_memory_ptr(&mut self, n1: u8, n2: u8, n3: u8) {
         let value = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
         self.i = value;
-        debug!("Set index register I to {value}");
+        trace!("Set index register I to {value}");
     }
 
     fn draw_sprite(&mut self, vx: usize, vy: usize, height: u8) {
@@ -282,6 +312,35 @@ impl Display {
         let set = self.scratch_pixels[idx..idx + 4] == [0xFF, 0xFF, 0xFF, 0xFF];
         self.scratch_pixels[idx..idx + 4].copy_from_slice(&pixels);
         set
+    }
+}
+
+#[derive(Debug)]
+pub struct Timers {
+    delay: u8,
+    sound: u8,
+}
+
+impl Timers {
+    pub fn update(&mut self) {
+        if self.delay > 0 {
+            self.delay -= 1;
+        }
+        if self.sound > 0 {
+            self.sound -= 1;
+            // TODO: play sound
+        }
+        trace!(
+            "Updated timers: [sound: {}] [delay: {}]",
+            self.sound,
+            self.delay
+        );
+    }
+}
+
+impl Default for Timers {
+    fn default() -> Self {
+        Self { delay: 0, sound: 0 }
     }
 }
 
