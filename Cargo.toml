@@ -9,6 +9,5 @@ pixels = "0.11.0"
 winit = "0.27.5"
 winit_input_helper = "0.13.0"
 
-[[bin]]
-name = "chip8"
-path = "src/bin/chip8.rs"
+[lib]
+path = "src/lib.rs"
