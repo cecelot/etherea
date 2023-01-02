@@ -191,6 +191,9 @@ impl Interpreter {
                 [8, x, y, 7] => self.sub(usize::from(x), usize::from(y), usize::from(x)),
                 [8, x, _, 0xE] => self.shift_left(usize::from(x)),
                 [0xC, x, n1, n2] => self.random(usize::from(x), n1, n2),
+                [0xF, x, 0, 7] => self.timer_to_vx(usize::from(x)),
+                [0xF, x, 1, 5] => self.vx_to_timer(usize::from(x), true),
+                [0xF, x, 1, 8] => self.vx_to_timer(usize::from(x), false),
                 _ => {}
             }
             std::thread::sleep(std::time::Duration::from_millis(1000 / 700));
@@ -285,6 +288,28 @@ impl Interpreter {
         let address = bits::recombine(n1, n2);
         let r: u8 = rand::thread_rng().gen();
         self.registers[vx] = address & r;
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx07-fx15-and-fx18-timers>
+    fn timer_to_vx(&mut self, vx: usize) {
+        let timers = self.get_timers();
+        let timers = timers.read().unwrap();
+        self.registers[vx] = timers.delay;
+        debug!("Written value {} to register V{vx:01X}", timers.delay);
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx07-fx15-and-fx18-timers>
+    fn vx_to_timer(&mut self, vx: usize, delay: bool) {
+        let timers = self.get_timers();
+        let value = self.registers[vx];
+        let mut timers = timers.write().unwrap();
+        let timer = if delay {
+            &mut timers.delay
+        } else {
+            &mut timers.sound
+        };
+        *timer = value;
+        debug!("Set timer [delay: {}] to {}", delay, value);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#1nnn-jump>
