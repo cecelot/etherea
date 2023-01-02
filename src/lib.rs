@@ -216,6 +216,7 @@ impl Interpreter {
                 self.timers.read().unwrap().sound,
                 self.timers.read().unwrap().delay
             );
+            trace!("Registers: {:?}", self.registers);
             match inst.nibbles[..] {
                 [0, 0, 0xE, 0] => self.get_display_mut().clear(), // 00E0
                 [1, n1, n2, n3] => self.jump(n1, n2, n3),         // 1NNN
@@ -265,14 +266,14 @@ impl Interpreter {
         self.stack.push(u16::try_from(self.pc).unwrap());
         let pc = usize::from_be_bytes([0, 0, 0, 0, 0, 0, n1, bits::recombine(n2, n3)]);
         self.pc = pc;
-        trace!("Set PC to {pc}");
+        trace!("call_subroutine: set PC to {pc}");
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#00ee-and-2nnn-subroutines>
     fn subroutine_return(&mut self) {
         let pc = usize::from(self.stack.pop().unwrap());
         self.pc = pc;
-        trace!("Set PC to {pc}");
+        trace!("subroutine_return: set PC to {pc}");
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#3xnn-4xnn-5xy0-and-9xy0-skip>
@@ -280,6 +281,7 @@ impl Interpreter {
         let vx = self.registers[register];
         let x = bits::recombine(n1, n2);
         if (equality && vx == x) || (!equality && vx != x) {
+            trace!("skip_vx: incremented pc by 2");
             self.pc += 2;
         }
     }
@@ -289,6 +291,7 @@ impl Interpreter {
         let vx = self.registers[vx];
         let vy = self.registers[vy];
         if (equality && vx == vy) || (!equality && vx != vy) {
+            trace!("skip_vxy: incremented pc by 2");
             self.pc += 2;
         }
     }
@@ -355,7 +358,10 @@ impl Interpreter {
         let timers = self.get_timers();
         let timers = timers.read().unwrap();
         self.registers[vx] = timers.delay;
-        debug!("Written value {} to register V{vx:01X}", timers.delay);
+        trace!(
+            "timer_to_vx: written value {} to register V{vx:01X}",
+            timers.delay
+        );
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx07-fx15-and-fx18-timers>
@@ -369,7 +375,7 @@ impl Interpreter {
             &mut timers.sound
         };
         *timer = value;
-        debug!("Set timer [delay: {}] to {}", delay, value);
+        trace!("vx_to_timer: set timer [delay: {}] to {}", delay, value);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx1e-add-to-index>
@@ -378,13 +384,17 @@ impl Interpreter {
         if self.i > 0x1000 {
             self.registers[0xF] = 1;
         }
+        trace!(
+            "add_to_index: added {} to index register",
+            self.registers[vx]
+        );
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#1nnn-jump>
     fn jump(&mut self, n1: u8, n2: u8, n3: u8) {
         let pc = usize::from_be_bytes([0, 0, 0, 0, 0, 0, n1, bits::recombine(n2, n3)]);
         self.pc = pc;
-        trace!("Jumped PC to {pc}");
+        trace!("jump: set PC to {pc}");
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#bnnn-jump-with-offset>
@@ -392,14 +402,17 @@ impl Interpreter {
         let address = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
         let pc = usize::from(address) + usize::from(self.registers[0x0]);
         self.pc = pc;
-        trace!("Jumped PC to {pc} (offset)");
+        trace!("jump_with_offset: set PC to {pc}");
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx29-font-character>
     fn font_character(&mut self, vx: usize) {
         let c = self.registers[vx];
-        self.i = u16::from(self.memory[font::MEMORY_RANGE.start() + usize::from(c * 4)]);
-        trace!("Set I to {}", self.i);
+        trace!("font [char: {:#X}]", c);
+        let start = u16::try_from(*font::MEMORY_RANGE.start()).unwrap();
+        self.i = start + u16::from(c * 5);
+        trace!("font [i: {:#X}]", self.i);
+        trace!("font_character: set I to {}", self.i);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx33-binary-coded-decimal-conversion>
@@ -430,39 +443,35 @@ impl Interpreter {
     fn set_register(&mut self, register: usize, n1: u8, n2: u8) {
         let value = bits::recombine(n1, n2);
         self.registers[register] = value;
-        trace!("Set register V{register:01X} to {value}");
+        trace!("set_register: V{register:01X} => {value}");
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#7xnn-add>
     fn add_to_register(&mut self, register: usize, n1: u8, n2: u8) {
         let value = bits::recombine(n1, n2);
         self.registers[register] = self.registers[register].wrapping_add(value);
-        trace!("Added {value} to register V{register:01X}");
+        trace!("add_to_register: V{register:01X} + {value}");
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#annn-set-index>
     fn set_memory_ptr(&mut self, n1: u8, n2: u8, n3: u8) {
         let value = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
         self.i = value;
-        trace!("Set index register I to {value}");
+        trace!("set_memory_ptr: set index register I to {value}");
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#dxyn-display>
     fn draw_sprite(&mut self, vx: usize, vy: usize, height: u8) {
         let x = self.registers[vx] % Display::WIDTH;
         let y = self.registers[vy] % Display::HEIGHT;
-        trace!("x: {x} height: {height}");
+        trace!("x: {x} y: {y} height: {height}");
         self.registers[0xF] = 0;
         for (idx, y) in (y..y + height).enumerate() {
             let sprite = self.memory[usize::from(self.i)..][idx];
             for (n, x) in (x..x + 8).enumerate() {
                 let n = u8::try_from(n).unwrap();
-                let lit = bits::set(7 - n, sprite);
-                trace!("Drawing pixel [on: {}] [idx: {idx}] at ({x}, {y})", lit);
-                if self
-                    .get_display_mut()
-                    .write_at(x, y, [0xFF, 0xFF, 0xFF, 0xFF], lit)
-                {
+                let on = bits::set(7 - n, sprite);
+                if on && self.get_display_mut().flip(x, y, [0xFF, 0xFF, 0xFF, 0xFF]) {
                     self.registers[0xF] = 1;
                 }
                 if x >= Display::WIDTH - 1 {
@@ -524,7 +533,6 @@ impl Interpreter {
 }
 
 /// The CHIP-8 display.
-#[derive(Debug)]
 pub struct Display {
     /// The pixels which are copied into [`pixels`](Self::pixels)
     /// upon a call to [`render`](Self::render).
@@ -583,6 +591,7 @@ impl Display {
     fn render(&mut self) {
         self.draw();
         self.pixels.render().unwrap();
+        trace!("{:?}", self);
     }
 
     /// Draws the [`scratch_pixels`](Self::scratch_pixels) to the live pixel buffer.
@@ -596,16 +605,40 @@ impl Display {
         }
     }
 
-    /// Writes the pixel at (`x`, `y`) with the RGBA values specified by `rgba` if
-    /// `on` is true, otherwise writes a black pixel.
-    fn write_at(&mut self, x: u8, y: u8, rgba: [u8; 4], on: bool) -> bool {
+    /// Flips the pixel at (`x`, `y`) with the RGBA values specified by `rgba`.
+    fn flip(&mut self, x: u8, y: u8, rgba: [u8; 4]) -> bool {
         let x = usize::from(x);
         let y = usize::from(y);
         let idx = (y * usize::from(Self::WIDTH) + x) * 4;
-        let pixels = if on { rgba } else { [0x0, 0x0, 0x0, 0x0] };
-        let set = self.scratch_pixels[idx..idx + 4] == [0xFF, 0xFF, 0xFF, 0xFF];
+        let cur = &self.scratch_pixels[idx..idx + 4];
+        let pixels = if cur == [0xFF, 0xFF, 0xFF, 0xFF] {
+            [0x0, 0x0, 0x0, 0x0]
+        } else {
+            rgba
+        };
         self.scratch_pixels[idx..idx + 4].copy_from_slice(&pixels);
-        set
+        self.scratch_pixels[idx..idx + 4] == [0x0, 0x0, 0x0, 0x0]
+    }
+
+    /// Gets the state of the pixel at (`x`, `y`).
+    fn get_at(&self, x: u8, y: u8) -> u8 {
+        let x = usize::from(x);
+        let y = usize::from(y);
+        let idx = (y * usize::from(Self::WIDTH) + x) * 4;
+        self.scratch_pixels[idx]
+    }
+}
+
+impl fmt::Debug for Display {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = String::new();
+        for y in 0..Display::HEIGHT {
+            for x in 0..Display::WIDTH {
+                s += if self.get_at(x, y) == 0x0 { " " } else { "█" };
+            }
+            s += "\n";
+        }
+        write!(f, "{s}")
     }
 }
 
