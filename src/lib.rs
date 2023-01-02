@@ -7,7 +7,7 @@ use std::{
     fmt,
     ops::{Deref, DerefMut},
     sync::{
-        mpsc::{Receiver, TryRecvError},
+        mpsc::{self, Receiver, Sender, TryRecvError},
         Arc, RwLock,
     },
     thread,
@@ -15,9 +15,10 @@ use std::{
 use winit::{
     dpi::LogicalSize,
     event::VirtualKeyCode,
-    event_loop::EventLoop,
+    event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+use winit_input_helper::WinitInputHelper;
 
 /// Helpers for the CLI.
 pub mod cli;
@@ -61,18 +62,23 @@ macro_rules! wrapper {
 
 /// The entrypoint for the CHIP-8 interpreter. Creates a new interpreter and
 /// starts two threads, one for the fetch/decode/execute loop and one for the
-/// 60Hz timer loop.
-pub fn run(rom: &[u8], el: &EventLoop<()>, rx: Receiver<VirtualKeyCode>) {
+/// 60Hz timer loop. Starts the window event loop in the calling thread.
+pub fn run(rom: &[u8]) {
+    let el = EventLoop::new();
+
     let intr = Arc::new(RwLock::new({
-        let display = Display::new(el);
+        let display = Display::new(&el);
         let mut intr = Interpreter::new();
         intr.attach_display(display);
         intr.load_rom(rom);
         intr
     }));
 
+    let (tx, rx) = mpsc::channel();
+
     Interpreter::main(Arc::clone(&intr), rx);
-    Interpreter::timers(&intr);
+    Interpreter::timers(Arc::clone(&intr));
+    Interpreter::ui(el, tx);
 }
 
 /// The CHIP-8 interpreter state.
@@ -120,11 +126,33 @@ impl Interpreter {
     }
 
     /// Creates a new thread for the 60Hz timer loop.
-    fn timers(intr: &Arc<RwLock<Interpreter>>) {
+    fn timers(intr: Arc<RwLock<Interpreter>>) {
         let timers = intr.read().unwrap().get_timers();
         thread::spawn(move || loop {
             timers.write().unwrap().update();
             std::thread::sleep(std::time::Duration::from_millis(1000 / 60));
+        });
+    }
+
+    fn ui(el: EventLoop<()>, tx: Sender<VirtualKeyCode>) {
+        let mut input = WinitInputHelper::new();
+        el.run(move |event, _, cf| {
+            *cf = ControlFlow::Poll;
+
+            if input.update(&event) {
+                if input.quit() {
+                    *cf = ControlFlow::Exit;
+                    return;
+                }
+
+                for &key in input::KEYMAP.keys() {
+                    if input.key_pressed(key) {
+                        trace!("Sending {:?} to interpreter", key);
+                        tx.send(key).unwrap();
+                        break;
+                    }
+                }
+            }
         });
     }
 
@@ -217,7 +245,7 @@ impl Interpreter {
                 [0xF, vx, 6, 5] => self.load_from_memory(usize::from(vx)),       // FX65
                 _ => unimplemented!(),
             }
-            std::thread::sleep(std::time::Duration::from_millis(1000 / 700));
+            std::thread::sleep(std::time::Duration::from_millis(3));
         }
     }
 
@@ -514,6 +542,7 @@ impl Display {
             );
             WindowBuilder::new()
                 .with_title("CHIP-8")
+                .with_resizable(false)
                 .with_inner_size(scaled)
                 .with_min_inner_size(size)
                 .build(el)
