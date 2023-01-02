@@ -216,9 +216,7 @@ impl Interpreter {
     fn skip_vx(&mut self, register: usize, n1: u8, n2: u8, equality: bool) {
         let vx = self.registers[register];
         let x = bits::recombine(n1, n2);
-        if equality && vx == x {
-            self.pc += 2;
-        } else if !equality && vx != x {
+        if (equality && vx == x) || (!equality && vx != x) {
             self.pc += 2;
         }
     }
@@ -227,9 +225,7 @@ impl Interpreter {
     fn skip_vxy(&mut self, vx: usize, vy: usize, equality: bool) {
         let vx = self.registers[vx];
         let vy = self.registers[vy];
-        if equality && vx == vy {
-            self.pc += 2;
-        } else if !equality && vx != vy {
+        if (equality && vx == vy) || (!equality && vx != vy) {
             self.pc += 2;
         }
     }
@@ -259,14 +255,14 @@ impl Interpreter {
         let x = usize::from(self.registers[vx]);
         let y = usize::from(self.registers[vy]);
         self.registers[vx] = self.registers[vx].wrapping_add(self.registers[vy]);
-        self.registers[0xF] = if x + y > 255 { 1 } else { 0 };
+        self.registers[0xF] = u8::from(x + y > 255);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy5-and-8xy7-subtract>
     fn sub(&mut self, vx: usize, lhs: usize, rhs: usize) {
         let lhs = self.registers[lhs];
         let rhs = self.registers[rhs];
-        self.registers[0xF] = if lhs > rhs { 1 } else { 0 };
+        self.registers[0xF] = u8::from(lhs > rhs);
         self.registers[vx] = lhs.wrapping_sub(rhs);
     }
 
@@ -274,14 +270,14 @@ impl Interpreter {
     fn shift_left(&mut self, vx: usize) {
         let shifted = bits::set(7, self.registers[vx]);
         self.registers[vx] <<= 1;
-        self.registers[0xF] = if shifted { 1 } else { 0 };
+        self.registers[0xF] = u8::from(shifted);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#8xy6-and-8xye-shift>
     fn shift_right(&mut self, vx: usize) {
         let shifted = bits::set(0, self.registers[vx]);
         self.registers[vx] >>= 1;
-        self.registers[0xF] = if shifted { 1 } else { 0 };
+        self.registers[0xF] = u8::from(shifted);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#cxnn-random>
