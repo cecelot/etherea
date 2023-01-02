@@ -77,7 +77,7 @@ pub fn run(rom: &[u8]) {
     let (tx, rx) = mpsc::channel();
 
     Interpreter::main(Arc::clone(&intr), rx);
-    Interpreter::timers(Arc::clone(&intr));
+    Interpreter::timers(&Arc::clone(&intr));
     Interpreter::ui(el, tx);
 }
 
@@ -126,7 +126,7 @@ impl Interpreter {
     }
 
     /// Creates a new thread for the 60Hz timer loop.
-    fn timers(intr: Arc<RwLock<Interpreter>>) {
+    fn timers(intr: &Arc<RwLock<Interpreter>>) {
         let timers = intr.read().unwrap().get_timers();
         thread::spawn(move || loop {
             timers.write().unwrap().update();
@@ -134,6 +134,7 @@ impl Interpreter {
         });
     }
 
+    /// Starts the window event loop.
     fn ui(el: EventLoop<()>, tx: Sender<VirtualKeyCode>) {
         let mut input = WinitInputHelper::new();
         el.run(move |event, _, cf| {
