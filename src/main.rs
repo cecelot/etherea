@@ -13,8 +13,8 @@ fn main() {
     let mut input = WinitInputHelper::new();
 
     let intr = Arc::new(RwLock::new({
-        let display = chip8::Display::new(&el);
-        let mut intr = chip8::Interpreter::new();
+        let display = etherea::Display::new(&el);
+        let mut intr = etherea::Interpreter::new();
         intr.attach_display(display);
         // intr.load_rom(KEYS_TEST);
         intr.load_rom(IBM_LOGO);
@@ -22,7 +22,7 @@ fn main() {
     }));
 
     let (tx, rx) = mpsc::channel();
-    chip8::run(&intr, rx);
+    etherea::run(&intr, rx);
 
     el.run(move |event, _, cf| {
         if input.update(&event) {
@@ -31,7 +31,7 @@ fn main() {
                 return;
             }
 
-            for &key in chip8::input::KEYMAP.keys() {
+            for &key in etherea::input::KEYMAP.keys() {
                 if input.key_pressed(key) {
                     trace!("Sending {:?} to interpreter", key);
                     tx.send(key).unwrap();
