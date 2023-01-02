@@ -645,7 +645,7 @@ wrapper! {
 
 /// A CHIP-8 instruction.
 #[derive(PartialEq)]
-struct Instruction {
+pub struct Instruction {
     nibbles: Vec<u8>,
 }
 
