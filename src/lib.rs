@@ -19,6 +19,8 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+/// Helpers for the CLI.
+pub mod cli;
 /// Font-related constants.
 mod font;
 /// Input-related constants.
@@ -57,11 +59,20 @@ macro_rules! wrapper {
     };
 }
 
-/// The entrypoint for the CHIP-8 interpreter. Creates two threads, one for
-/// the fetch/decode/execute loop and one for the 60Hz timer loop.
-pub fn run(intr: &Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
-    Interpreter::main(Arc::clone(intr), rx);
-    Interpreter::timers(intr);
+/// The entrypoint for the CHIP-8 interpreter. Creates a new interpreter and
+/// starts two threads, one for the fetch/decode/execute loop and one for the
+/// 60Hz timer loop.
+pub fn run(rom: &[u8], el: &EventLoop<()>, rx: Receiver<VirtualKeyCode>) {
+    let intr = Arc::new(RwLock::new({
+        let display = Display::new(el);
+        let mut intr = Interpreter::new();
+        intr.attach_display(display);
+        intr.load_rom(rom);
+        intr
+    }));
+
+    Interpreter::main(Arc::clone(&intr), rx);
+    Interpreter::timers(&intr);
 }
 
 /// The CHIP-8 interpreter state.

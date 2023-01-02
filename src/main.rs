@@ -1,32 +1,21 @@
-use log::trace;
-use std::sync::{mpsc, Arc, RwLock};
+use etherea::cli;
+use log::{error, trace};
+use std::{fmt, fs, io, path::Path, sync::mpsc};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit_input_helper::WinitInputHelper;
 
-const _IBM_LOGO: &[u8] = include_bytes!("../roms/ibm-logo.ch8");
-const FULL_TEST: &[u8] = include_bytes!("../roms/opcode-test.ch8");
-const _KEYS_TEST: &[u8] = &[0xF0, 0x0A, 0xE0, 0x9E, 0x12, 0x04];
-const _TIMER_TEST: &[u8] = &[0xF0, 0x07, 0xF0, 0x15, 0xF0, 0x18, 0x12, 0x06];
-
 fn main() {
-    env_logger::init();
-
+    let cli = cli::init();
     let el = EventLoop::new();
     let mut input = WinitInputHelper::new();
 
-    let intr = Arc::new(RwLock::new({
-        let display = etherea::Display::new(&el);
-        let mut intr = etherea::Interpreter::new();
-        intr.attach_display(display);
-        intr.load_rom(FULL_TEST);
-        // intr.load_rom(KEYS_TEST);
-        // intr.load_rom(IBM_LOGO);
-        // intr.load_rom(TIMER_TEST);
-        intr
-    }));
+    let rom = read(&cli.path).unwrap_or_else(|err| {
+        error!("{}", err);
+        std::process::exit(1);
+    });
 
     let (tx, rx) = mpsc::channel();
-    etherea::run(&intr, rx);
+    etherea::run(&rom, &el, rx);
 
     el.run(move |event, _, cf| {
         if input.update(&event) {
@@ -44,4 +33,10 @@ fn main() {
             }
         }
     });
+}
+
+fn read<P: AsRef<Path> + fmt::Display>(path: P) -> Result<Vec<u8>, String> {
+    let err = |_: io::Error| format!("Could not read file: '{}'", path);
+    let path = fs::canonicalize(&path).map_err(err)?;
+    fs::read(&path).map_err(err)
 }
