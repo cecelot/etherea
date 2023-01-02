@@ -63,13 +63,14 @@ macro_rules! wrapper {
 /// The entrypoint for the CHIP-8 interpreter. Creates a new interpreter and
 /// starts two threads, one for the fetch/decode/execute loop and one for the
 /// 60Hz timer loop. Starts the window event loop in the calling thread.
-pub fn run(rom: &[u8]) {
+pub fn run(rom: &[u8], ips: u64) {
     let el = EventLoop::new();
 
     let intr = Arc::new(RwLock::new({
         let display = Display::new(&el);
         let mut intr = Interpreter::new();
         intr.attach_display(display);
+        intr.with_ips(ips);
         intr.load_rom(rom);
         intr
     }));
@@ -92,6 +93,7 @@ pub struct Interpreter {
     display: Option<Display>,    // Display
     timers: Arc<RwLock<Timers>>, // Timers
     registers: RegisterArray,    // Variable registers (V0..=VF)
+    ips: u64,                    // Instructions per second
 }
 
 impl Interpreter {
@@ -112,6 +114,11 @@ impl Interpreter {
     pub fn attach_display(&mut self, display: Display) {
         self.display = Some(display);
         info!("Attached display [success: true]");
+    }
+
+    /// Sets the number of instructions to execute per second.
+    pub fn with_ips(&mut self, ips: u64) {
+        self.ips = ips;
     }
 
     /// Creates a new thread for the fetch/decode/execute loop.
@@ -249,7 +256,7 @@ impl Interpreter {
                     std::process::exit(1);
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(3));
+            std::thread::sleep(std::time::Duration::from_millis(1000 / self.ips));
         }
     }
 

@@ -9,7 +9,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    etherea::run(&rom);
+    etherea::run(&rom, cli.ips.unwrap_or(700));
 }
 
 fn read<P: AsRef<Path> + fmt::Display>(path: P) -> Result<Vec<u8>, String> {

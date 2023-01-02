@@ -6,20 +6,24 @@ pub struct Cli {
     /// The path to the ROM
     pub path: String,
 
+    /// The number of instructions to execute per second
+    #[arg(short, long)]
+    pub ips: Option<u64>,
+
     /// Verbosity of debug logging
     #[arg(short, long, value_enum)]
-    debug: Option<DebugMode>,
+    log_level: Option<LogLevel>,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
-enum DebugMode {
+enum LogLevel {
     Info,
     Debug,
     Trace,
     Error,
 }
 
-impl ToString for DebugMode {
+impl ToString for LogLevel {
     fn to_string(&self) -> String {
         match self {
             Self::Info => "info".into(),
@@ -37,7 +41,7 @@ pub fn init() -> Cli {
         "RUST_LOG",
         format!(
             "etherea={}",
-            cli.debug.unwrap_or(DebugMode::Error).to_string()
+            cli.log_level.unwrap_or(LogLevel::Error).to_string()
         ),
     );
 
