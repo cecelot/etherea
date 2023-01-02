@@ -15,9 +15,15 @@ cargo install etherea
 ## Usage
 
 **Run a ROM:**
+ 
+```sh
+etherea run path/to/rom.ch8
+```
+
+**Disassemble a ROM:**
 
 ```sh
-etherea path/to/rom.ch8
+etherea disassemble path/to/rom.ch8
 ```
 
 **View options:**
