@@ -100,6 +100,10 @@ impl Interpreter {
     /// Creates a new thread for the fetch/decode/execute loop.
     fn main(intr: Arc<RwLock<Interpreter>>, rx: Receiver<VirtualKeyCode>) {
         thread::spawn(move || {
+            std::panic::set_hook(Box::new(|info| {
+                error!("{}", info);
+                std::process::exit(1);
+            }));
             intr.write().unwrap().execute(&rx);
         });
     }
@@ -166,35 +170,41 @@ impl Interpreter {
                 self.timers.read().unwrap().delay
             );
             match inst.nibbles[..] {
-                [0, 0, 0xE, 0] => self.get_display_mut().clear(),
-                [1, n1, n2, n3] => self.jump(n1, n2, n3),
-                [6, register, n1, n2] => self.set_register(usize::from(register), n1, n2),
-                [7, register, n1, n2] => self.add_to_register(usize::from(register), n1, n2),
-                [0xA, n1, n2, n3] => self.set_memory_ptr(n1, n2, n3),
-                [0xD, vx, vy, height] => self.draw_sprite(usize::from(vx), usize::from(vy), height),
-                [0xF, vx, 0x0, 0xA] => self.get_key(usize::from(vx), rx),
-                [0xE, vx, 0x9, 0xE] => self.skip_key(usize::from(vx), rx, true),
-                [0xE, vx, 0xA, 0x1] => self.skip_key(usize::from(vx), rx, false),
-                [2, n1, n2, n3] => self.call_subroutine(n1, n2, n3),
-                [0, 0, 0xE, 0xE] => self.subroutine_return(),
-                [0x3, register, n1, n2] => self.skip_vx(usize::from(register), n1, n2, true),
-                [0x4, register, n1, n2] => self.skip_vx(usize::from(register), n1, n2, false),
-                [5, vx, vy, 0] => self.skip_vxy(usize::from(vx), usize::from(vy), true),
-                [9, vx, vy, 0] => self.skip_vxy(usize::from(vx), usize::from(vy), false),
-                [8, x, y, 0] => self.set(usize::from(x), usize::from(y)),
-                [8, x, y, 1] => self.or(usize::from(x), usize::from(y)),
-                [8, x, y, 2] => self.and(usize::from(x), usize::from(y)),
-                [8, x, y, 3] => self.xor(usize::from(x), usize::from(y)),
-                [8, x, y, 4] => self.add(usize::from(x), usize::from(y)),
-                [8, x, y, 5] => self.sub(usize::from(x), usize::from(x), usize::from(y)),
-                [8, x, _, 6] => self.shift_right(usize::from(x)),
-                [8, x, y, 7] => self.sub(usize::from(x), usize::from(y), usize::from(x)),
-                [8, x, _, 0xE] => self.shift_left(usize::from(x)),
-                [0xC, x, n1, n2] => self.random(usize::from(x), n1, n2),
-                [0xF, x, 0, 7] => self.timer_to_vx(usize::from(x)),
-                [0xF, x, 1, 5] => self.vx_to_timer(usize::from(x), true),
-                [0xF, x, 1, 8] => self.vx_to_timer(usize::from(x), false),
-                _ => {}
+                [0, 0, 0xE, 0] => self.get_display_mut().clear(), // 00E0
+                [1, n1, n2, n3] => self.jump(n1, n2, n3),         // 1NNN
+                [0, 0, 0xE, 0xE] => self.subroutine_return(),     // 00EE
+                [2, n1, n2, n3] => self.call_subroutine(n1, n2, n3), // 2NNN
+                [3, register, n1, n2] => self.skip_vx(usize::from(register), n1, n2, true), // 3XNN
+                [4, register, n1, n2] => self.skip_vx(usize::from(register), n1, n2, false), // 4XNN
+                [5, vx, vy, 0] => self.skip_vxy(usize::from(vx), usize::from(vy), true), // 5XY0
+                [9, vx, vy, 0] => self.skip_vxy(usize::from(vx), usize::from(vy), false), // 9XY0
+                [6, register, n1, n2] => self.set_register(usize::from(register), n1, n2), // 6XNN
+                [7, register, n1, n2] => self.add_to_register(usize::from(register), n1, n2), // 7XNN
+                [8, x, y, 0] => self.set(usize::from(x), usize::from(y)), // 8XY0
+                [8, x, y, 1] => self.or(usize::from(x), usize::from(y)),  // 8XY1
+                [8, x, y, 2] => self.and(usize::from(x), usize::from(y)), // 8XY2
+                [8, x, y, 3] => self.xor(usize::from(x), usize::from(y)), // 8XY3
+                [8, x, y, 4] => self.add(usize::from(x), usize::from(y)), // 8XY4
+                [8, x, y, 5] => self.sub(usize::from(x), usize::from(x), usize::from(y)), // 8XY5
+                [8, x, y, 7] => self.sub(usize::from(x), usize::from(y), usize::from(x)), // 8XY7
+                [8, x, _, 6] => self.shift_right(usize::from(x)),         // 8XY6
+                [8, x, _, 0xE] => self.shift_left(usize::from(x)),        // 8XYE
+                [0xA, n1, n2, n3] => self.set_memory_ptr(n1, n2, n3),     // ANNN
+                [0xB, n1, n2, n3] => self.jump_with_offset(n1, n2, n3),   // BNNN
+                [0xC, x, n1, n2] => self.random(usize::from(x), n1, n2),  // CXNN
+                [0xD, vx, vy, height] => self.draw_sprite(usize::from(vx), usize::from(vy), height), // DXYN
+                [0xE, vx, 0x9, 0xE] => self.skip_key(usize::from(vx), rx, true), // EX9E
+                [0xE, vx, 0xA, 0x1] => self.skip_key(usize::from(vx), rx, false), // EXA1
+                [0xF, x, 0, 7] => self.timer_to_vx(usize::from(x)),              // FX07
+                [0xF, x, 1, 5] => self.vx_to_timer(usize::from(x), true),        // FX15
+                [0xF, x, 1, 8] => self.vx_to_timer(usize::from(x), false),       // FX18
+                [0xF, x, 0x1, 0xE] => self.add_to_index(usize::from(x)),         // FX1E
+                [0xF, vx, 0x0, 0xA] => self.get_key(usize::from(vx), rx),        // FX0A
+                [0xF, vx, 2, 9] => self.font_character(usize::from(vx)),         // FX29
+                [0xF, vx, 3, 3] => self.conversion(usize::from(vx)),             // FX33
+                [0xF, vx, 5, 5] => self.store_to_memory(usize::from(vx)),        // FX55
+                [0xF, vx, 6, 5] => self.load_from_memory(usize::from(vx)),       // FX65
+                _ => unimplemented!(),
             }
             std::thread::sleep(std::time::Duration::from_millis(1000 / 700));
         }
@@ -312,11 +322,58 @@ impl Interpreter {
         debug!("Set timer [delay: {}] to {}", delay, value);
     }
 
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx1e-add-to-index>
+    fn add_to_index(&mut self, vx: usize) {
+        self.i += u16::from(self.registers[vx]);
+        if self.i > 0x1000 {
+            self.registers[0xF] = 1;
+        }
+    }
+
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#1nnn-jump>
     fn jump(&mut self, n1: u8, n2: u8, n3: u8) {
         let pc = usize::from_be_bytes([0, 0, 0, 0, 0, 0, n1, bits::recombine(n2, n3)]);
         self.pc = pc;
         trace!("Jumped PC to {pc}");
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#bnnn-jump-with-offset>
+    fn jump_with_offset(&mut self, n1: u8, n2: u8, n3: u8) {
+        let address = u16::from_be_bytes([n1, bits::recombine(n2, n3)]);
+        let pc = usize::from(address) + usize::from(self.registers[0x0]);
+        self.pc = pc;
+        trace!("Jumped PC to {pc} (offset)");
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx29-font-character>
+    fn font_character(&mut self, vx: usize) {
+        let c = self.registers[vx];
+        self.i = u16::from(self.memory[font::MEMORY_RANGE.start() + usize::from(c * 4)]);
+        trace!("Set I to {}", self.i);
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx33-binary-coded-decimal-conversion>
+    fn conversion(&mut self, vx: usize) {
+        let x = usize::from(self.registers[vx]);
+        let i = usize::from(self.i);
+        let a = u8::try_from(digit(2, x)).unwrap();
+        let b = u8::try_from(digit(1, x)).unwrap();
+        let c = u8::try_from(digit(0, x)).unwrap();
+        self.memory[i..i + 3].copy_from_slice(&[a, b, c]);
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx55-and-fx65-store-and-load-memory>
+    fn store_to_memory(&mut self, vx: usize) {
+        let len = (0x0..=vx).count();
+        let i = usize::from(self.i);
+        self.memory[i..i + len].copy_from_slice(&self.registers[0x0..=vx])
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#fx55-and-fx65-store-and-load-memory>
+    fn load_from_memory(&mut self, vx: usize) {
+        let len = (0x0..=vx).count();
+        let i = usize::from(self.i);
+        self.registers[0x0..=vx].copy_from_slice(&self.memory[i..i + len]);
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#6xnn-set>
@@ -329,7 +386,7 @@ impl Interpreter {
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#7xnn-add>
     fn add_to_register(&mut self, register: usize, n1: u8, n2: u8) {
         let value = bits::recombine(n1, n2);
-        self.registers[register] += value;
+        self.registers[register] = self.registers[register].wrapping_add(value);
         trace!("Added {value} to register V{register:01X}");
     }
 
@@ -358,6 +415,12 @@ impl Interpreter {
                 {
                     self.registers[0xF] = 1;
                 }
+                if x >= Display::WIDTH {
+                    break;
+                }
+            }
+            if y >= Display::HEIGHT {
+                break;
             }
         }
         self.get_display_mut().render();
@@ -572,6 +635,10 @@ mod bits {
     }
 }
 
+fn digit(i: u32, n: usize) -> usize {
+    (n / (10usize.pow(i))) % 10
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,5 +653,13 @@ mod tests {
                 nibbles: vec![0, 0, 0b0010, 0b1110]
             }
         );
+    }
+
+    #[test]
+    fn to_digits() {
+        let n = 456;
+        assert_eq!(digit(0, n), 6);
+        assert_eq!(digit(1, n), 5);
+        assert_eq!(digit(2, n), 4);
     }
 }
