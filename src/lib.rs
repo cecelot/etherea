@@ -2,6 +2,7 @@
 //! A CHIP-8 interpreter.
 use log::{debug, error, info, trace};
 use pixels::{Pixels, SurfaceTexture};
+use rand::Rng;
 use std::{
     fmt,
     ops::{Deref, DerefMut},
@@ -189,6 +190,7 @@ impl Interpreter {
                 [8, x, _, 6] => self.shift_right(usize::from(x)),
                 [8, x, y, 7] => self.sub(usize::from(x), usize::from(y), usize::from(x)),
                 [8, x, _, 0xE] => self.shift_left(usize::from(x)),
+                [0xC, x, n1, n2] => self.random(usize::from(x), n1, n2),
                 _ => {}
             }
             std::thread::sleep(std::time::Duration::from_millis(1000 / 700));
@@ -280,6 +282,13 @@ impl Interpreter {
         let shifted = bits::set(0, self.registers[vx]);
         self.registers[vx] >>= 1;
         self.registers[0xF] = if shifted { 1 } else { 0 };
+    }
+
+    /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#cxnn-random>
+    fn random(&mut self, vx: usize, n1: u8, n2: u8) {
+        let address = bits::recombine(n1, n2);
+        let r: u8 = rand::thread_rng().gen();
+        self.registers[vx] = address & r;
     }
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#1nnn-jump>
