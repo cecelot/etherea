@@ -1,29 +1,35 @@
-use log::error;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use winit::{event::Event, event_loop::EventLoop};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit_input_helper::WinitInputHelper;
+
+const IBM_LOGO: &[u8] = include_bytes!("../roms/ibm-logo.ch8");
 
 fn main() {
     env_logger::init();
 
     let event_loop = EventLoop::new();
-    let intr = Arc::new(RwLock::new(chip8::Interpreter::new(&event_loop)));
+    let mut input = WinitInputHelper::new();
 
-    intr.write()
-        .unwrap()
-        .load_rom(include_bytes!("../roms/ibm-logo.ch8").to_vec());
+    let intr = Arc::new(RwLock::new({
+        let display = chip8::Display::new(&event_loop);
+        let mut intr = chip8::Interpreter::new();
+        intr.attach_display(display);
+        intr.load_rom(IBM_LOGO.to_vec());
+        intr
+    }));
 
     let intr1 = Arc::clone(&intr);
     thread::spawn(move || {
         intr1.write().unwrap().execute();
     });
 
-    event_loop.run(move |event, _, _| {
-        if let Event::RedrawRequested(_) = event {
-            if let Err(e) = intr.write().unwrap().get_display_mut().render() {
-                error!("Failed to render to screen: {}", e);
+    event_loop.run(move |event, _, control_flow| {
+        if input.update(&event) {
+            if input.quit() {
+                *control_flow = ControlFlow::Exit;
+                return;
             }
         }
-        intr.write().unwrap().get_window().request_redraw();
     });
 }
