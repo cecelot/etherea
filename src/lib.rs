@@ -78,7 +78,7 @@ pub fn run(rom: &[u8], ips: u64) {
     let (tx, rx) = mpsc::channel();
 
     Interpreter::main(Arc::clone(&intr), rx);
-    Interpreter::timers(&Arc::clone(&intr));
+    Interpreter::timers(&intr);
     Interpreter::ui(el, tx);
 }
 
@@ -153,12 +153,9 @@ impl Interpreter {
                     return;
                 }
 
-                for &key in input::KEYMAP.keys() {
-                    if input.key_pressed(key) {
-                        trace!("Sending {:?} to interpreter", key);
-                        tx.send(key).unwrap();
-                        break;
-                    }
+                let key = input::KEYMAP.keys().find(|&&key| input.key_pressed(key));
+                if let Some(&key) = key {
+                    tx.send(key).unwrap();
                 }
             }
         });
@@ -508,27 +505,17 @@ impl Interpreter {
 
     /// <https://tobiasvl.github.io/blog/write-a-chip-8-emulator/#ex9e-and-exa1-skip-if-key>
     fn skip_key(&mut self, vx: usize, rx: &Receiver<VirtualKeyCode>, press: bool) {
-        std::thread::sleep(std::time::Duration::from_millis(200)); // TODO: figure out a better way
-        match rx.try_recv() {
-            Ok(key) => {
-                let &key = input::KEYMAP.get(&key).unwrap();
-                trace!("Key received: {key:01X} | VX: {}", self.registers[vx]);
-                if press && self.registers[vx] == key {
-                    self.pc += 2;
-                    trace!("Incremented PC by 2");
-                } else if !press && self.registers[vx] != key {
-                    self.pc += 2;
-                    trace!("Incremented PC by 2");
-                }
+        if let Ok(key) = rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            let &key = input::KEYMAP.get(&key).unwrap();
+            trace!("Key received: {key:01X} | VX: {}", self.registers[vx]);
+            if press && self.registers[vx] == key {
+                self.pc += 2;
+                trace!("Incremented PC by 2");
+            } else if !press && self.registers[vx] != key {
+                self.pc += 2;
+                trace!("Incremented PC by 2");
             }
-            Err(e) => match e {
-                TryRecvError::Empty => {}
-                TryRecvError::Disconnected => {
-                    error!("Key receiver hung up");
-                    std::process::exit(1);
-                }
-            },
-        };
+        }
     }
 }
 
