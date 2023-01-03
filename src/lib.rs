@@ -249,6 +249,7 @@ impl Interpreter {
                 [0xF, vx, 3, 3] => self.conversion(usize::from(vx)),             // FX33
                 [0xF, vx, 5, 5] => self.store_to_memory(usize::from(vx)),        // FX55
                 [0xF, vx, 6, 5] => self.load_from_memory(usize::from(vx)),       // FX65
+                [0x0, _, _, _] => {}                                             // 0NNN
                 _ => {
                     error!("Unknown opcode: {:?}", &inst);
                     std::process::exit(1);
