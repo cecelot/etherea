@@ -1,8 +1,8 @@
 [package]
 name = "etherea"
 description = "An interpreter for the CHIP-8 programming language."
-homepage = "https://github.com/alythical/etherea"
-repository = "https://github.com/alythical/etherea"
+homepage = "https://github.com/cecelot/etherea"
+repository = "https://github.com/cecelot/etherea"
 readme = "README.md"
 license = "MIT"
 version = "0.2.3"
